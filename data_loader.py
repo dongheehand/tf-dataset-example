@@ -1,17 +1,7 @@
-
-# coding: utf-8
-
-# In[ ]:
-
-
 import tensorflow as tf
 import numpy as np
 import argparse
 import os
-
-
-# In[ ]:
-
 
 class data_loader():
     
@@ -50,10 +40,6 @@ class data_loader():
         image = tf.image.decode_png(image, channels = self.channel)
         
         return image
-
-
-# In[ ]:
-
 
 from PIL import Image
 
