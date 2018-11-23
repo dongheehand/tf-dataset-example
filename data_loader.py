@@ -7,25 +7,30 @@ class data_loader():
     
     def __init__(self, conf):
         
-        self.batch_size = conf['batch_size']
-        self.in_memory = conf['in_memory']
-        self.channel = conf['channel']
-        
+        self.batch_size = args.batch_size
+        self.in_memory = args.in_memory
+        self.channel = args.channel
+        self.tf_records = args.tf_records
         if self.in_memory:
-            self.width = conf['width']
-            self.height = conf['height']
+            self.width = args.width
+            self.height = args.height
             self.image_arr = tf.placeholder(shape = [None, self.height, self.width, self.channel], dtype = tf.uint8)
         
-        if not self.in_memory:
-            self.image_arr  = conf['data_path']
+        if not self.in_memory or self.tf_records :
+            self.image_arr  = np.array([os.path.join(args.data_direc, ele) for ele in sorted(os.listdir(args.data_direc))])
             
     def build_loader(self):
-
-        self.tr_dataset = tf.data.Dataset.from_tensor_slices(self.image_arr)
-
-        if not self.in_memory :
-            self.tr_dataset = self.tr_dataset.map(self._parse, num_parallel_calls = 4).prefetch(32)
-
+        
+        if not self.tf_records:
+            self.tr_dataset = tf.data.Dataset.from_tensor_slices(self.image_arr)
+            
+            if not self.in_memory:
+                self.tr_dataset = self.tr_dataset.map(self._parse, num_parallel_calls = 4).prefetch(32)
+        
+        else:
+            self.tr_dataset = tf.data.TFRecordDataset(self.image_arr)
+            self.tr_dataset = self.tr_dataset.map(self._tf_record_parse, num_parallel_calls = 4).prefetch(32)
+        
         self.tr_dataset = self.tr_dataset.shuffle(32)
         self.tr_dataset = self.tr_dataset.repeat()
         self.tr_dataset = self.tr_dataset.batch(self.batch_size)
@@ -40,11 +45,29 @@ class data_loader():
         image = tf.image.decode_png(image, channels = self.channel)
         
         return image
+    
+    def _tf_record_parse(self, example):
+        
+        feature = {'img' : tf.FixedLenFeature([], tf.string),
+                  'height' : tf.FixedLenFeature([], tf.int64),
+                  'width' : tf.FixedLenFeature([], tf.int64)}
+        
+        parsed_feature = tf.parse_single_example(example, feature)
+        
+        img = tf.decode_raw(parsed_feature['img'], tf.uint8)        
+        height = tf.cast(parsed_feature['height'], tf.int32)
+        width = tf.cast(parsed_feature['width'], tf.int32)
+        
+        img = tf.reshape(img, (height, width, self.channel))
+        
+        return img
+    
 
-from PIL import Image
 
 if __name__ == '__main__':
-    
+
+    from PIL import Image
+
     def str2bool(v):
         return v.lower() in ('true')
 
@@ -55,29 +78,16 @@ if __name__ == '__main__':
     parser.add_argument("--width", type = int, default = 600)
     parser.add_argument("--height", type = int, default = 600)
     parser.add_argument("--data_direc", type = str, default = './test_data/')
-    parser.add_argument("--result_path", type = str, default = './result')
+    parser.add_argument("--result_path", type = str, default = './result/')
+    parser.add_argument("--tf_records", type = str2bool, default = False)
     parser.add_argument("--test_num", type = int, default = 3)
     
     args = parser.parse_args()
-
-    conf = {}
     
-    conf['batch_size'] = args.batch_size
-    conf['in_memory'] = args.in_memory
-    conf['channel'] = args.channel
-    conf['width'] = args.width
-    conf['height'] = args.height
-    conf['data_direc'] = args.data_direc
-    conf['result_path'] = args.result_path
-    conf['test_num'] = args.test_num
+    if not os.path.exists(args.result_path):
+        os.makedirs(args.result_path)
     
-    img_list = sorted(os.listdir(conf['data_direc']))
-    conf['data_path'] = np.array([os.path.join(conf['data_direc'], ele) for ele in img_list])
-    
-    if not os.path.exists(conf['result_path']):
-        os.makedirs(conf['result_path'])
-    
-    data_loader = data_loader(conf)
+    data_loader = data_loader(args)
     data_loader.build_loader()
     
     tf_output = data_loader.next_batch
@@ -88,10 +98,10 @@ if __name__ == '__main__':
     sess = tf.Session(config = config)
     sess.run(tf.global_variables_initializer())
     
-    if conf['in_memory']:
+    if args.in_memory and not args.tf_records:
         img_list = []
-        for ele in conf['data_path']:
-            img_list.append(np.array(Image.open(ele)))
+        for ele in sorted(os.listdir(args.data_direc)):
+            img_list.append(np.array(Image.open(os.path.join(args.data_direc, ele))))
         img_list = np.array(img_list)
         
         sess.run(data_loader.init_op, feed_dict = {data_loader.image_arr : img_list})
@@ -100,11 +110,11 @@ if __name__ == '__main__':
         
     count = 0
     
-    for i in range(conf['test_num']):
+    for i in range(args.test_num):
         
         output = sess.run(tf_output)
         for ele in output:
             img = Image.fromarray(ele)
-            img.save(os.path.join(conf['result_path'], '%02d_result.png'%count))
+            img.save(os.path.join(args.result_path, '%02d_result.png'%count))
             count += 1
 
